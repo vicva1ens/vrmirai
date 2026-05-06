@@ -1,23 +1,193 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8">
-  <title>Step 3</title>
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <style>body{margin:0}</style>
-</head>
-<body>
-  <a-scene>
-    <a-assets>
-      <a-asset-item id="model" src="3Dmodel.glb"></a-asset-item>
-      <img id="pano" src="360image01.jpg">
-    </a-assets>
+  <head>
+    <meta charset="utf-8" />
+    <title>Portal de Piedra Neon</title>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script>
+      AFRAME.registerComponent('portal-sky-switch', {
+        schema: {
+          skySelector: { default: '#cielo360' },
+          srcBefore: { type: 'string', default: '' },
+          srcAfter: { type: 'string', default: '' },
+          colorBefore: { type: 'color', default: '#0f1118' },
+          portalZ: { default: -6 },
+          zEnter: { default: -6.15 },
+          zExit: { default: -5.55 },
+          maxAbsX: { default: 1.5 }
+        },
+        init: function () {
+          this.crossed = false;
+          this.camEl = null;
+        },
+        tick: function () {
+          if (!this.camEl) {
+            this.camEl = this.el.sceneEl.querySelector('a-camera');
+            if (!this.camEl) return;
+          }
+          var sky = this.el.sceneEl.querySelector(this.data.skySelector);
+          if (!sky) return;
 
-    <!-- 3D Model -->
-    <a-entity gltf-model="#model" position="0 1.2 -2" scale="1 1 1"></a-entity>
+          var p = new THREE.Vector3();
+          this.camEl.object3D.getWorldPosition(p);
 
-    <!-- 360 Environment -->
-    <a-sky src="#pano" rotation="0 -90 0"></a-sky>
-  </a-scene>
-</body>
+          var crossed = this.crossed;
+          if (p.z < this.data.zEnter && Math.abs(p.x) < this.data.maxAbsX) {
+            crossed = true;
+          } else if (p.z > this.data.zExit) {
+            crossed = false;
+          }
+
+          if (crossed !== this.crossed) {
+            this.crossed = crossed;
+            if (crossed) {
+              if (this.data.srcAfter) {
+                sky.setAttribute('src', this.data.srcAfter);
+                sky.removeAttribute('color');
+              }
+            } else {
+              if (this.data.srcBefore) {
+                sky.setAttribute('src', this.data.srcBefore);
+                sky.removeAttribute('color');
+              } else {
+                sky.removeAttribute('src');
+                sky.setAttribute('color', this.data.colorBefore);
+              }
+            }
+          }
+        }
+      });
+
+      AFRAME.registerComponent('snap-to-ground', {
+        schema: {
+          cameraSelector: { default: 'a-camera' },
+          maxDistance: { default: 40 },
+          smooth: { default: 0.35 },
+          rayStartUp: { default: 2 }
+        },
+        init: function () {
+          this.raycaster = new THREE.Raycaster();
+          this.origin = new THREE.Vector3();
+          this.down = new THREE.Vector3(0, -1, 0);
+          this.meshes = [];
+          this.dirtyMeshes = true;
+        },
+        collectWalkable: function () {
+          this.meshes.length = 0;
+          var sceneEl = this.el.sceneEl;
+          sceneEl.querySelectorAll('.walkable').forEach(function (el) {
+            el.object3D.traverse(function (node) {
+              if (node.isMesh && node.visible) this.meshes.push(node);
+            }.bind(this));
+          }.bind(this));
+          this.dirtyMeshes = false;
+        },
+        tick: function () {
+          if (this.dirtyMeshes) this.collectWalkable();
+          var cam = this.el.querySelector(this.data.cameraSelector);
+          if (!cam) return;
+          cam.object3D.getWorldPosition(this.origin);
+          this.origin.y += this.data.rayStartUp;
+          this.raycaster.set(this.origin, this.down);
+          this.raycaster.far = this.data.maxDistance + this.data.rayStartUp;
+          var hits = this.raycaster.intersectObjects(this.meshes, true);
+          if (!hits.length) return;
+          var groundY = hits[0].point.y;
+          var rig = this.el.object3D;
+          var wy = rig.position.y;
+          var ty = groundY;
+          rig.position.y = wy + (ty - wy) * this.data.smooth;
+        }
+      });
+    </script>
+  </head>
+  <body>
+    <a-scene
+      portal-sky-switch="skySelector: #cielo360; srcBefore: 360_mundo1.jpg; srcAfter: 360_mundo2.jpg; colorBefore: #0f1118"
+    >
+      <a-light type="ambient" intensity="0.45" color="#bfc7d5"></a-light>
+      <a-light type="directional" intensity="0.7" color="#ffffff" position="2 6 3"></a-light>
+      <a-light type="point" intensity="1.2" color="#00f0ff" position="0 2.2 -6" distance="12"></a-light>
+
+      <a-entity id="rig" position="0 0 3" wasd-controls snap-to-ground>
+        <a-camera look-controls position="0 1.6 0"></a-camera>
+      </a-entity>
+
+      <a-plane
+        class="walkable"
+        position="0 0 0"
+        rotation="-90 0 0"
+        width="80"
+        height="80"
+        visible="false"
+        material="opacity: 0; transparent: true; side: double"
+      ></a-plane>
+
+      <a-cylinder
+        class="walkable"
+        position="0 0 -6"
+        radius="5.5"
+        height="0.35"
+        color="#6e7178"
+        material="roughness: 0.95; metalness: 0.05;"
+      ></a-cylinder>
+
+      <a-torus
+        position="0 0.2 -6"
+        radius="5.5"
+        radius-tubular="0.09"
+        rotation="90 0 0"
+        color="#5f636a"
+        material="roughness: 1; metalness: 0;"
+      ></a-torus>
+
+      <a-box class="walkable" position="0 0.2 -3.2" width="3.8" height="0.35" depth="1.2" color="#767b84" material="roughness: 1;"></a-box>
+      <a-box class="walkable" position="0 0.5 -4.1" width="3.1" height="0.35" depth="1.2" color="#70757e" material="roughness: 1;"></a-box>
+      <a-box class="walkable" position="0 0.8 -5.0" width="2.4" height="0.35" depth="1.2" color="#686d76" material="roughness: 1;"></a-box>
+      <a-box class="walkable" position="0 1.1 -5.9" width="1.8" height="0.35" depth="1.2" color="#626771" material="roughness: 1;"></a-box>
+
+      <!-- Escaleras traseras del portal -->
+      <a-box class="walkable" position="0 0.2 -8.8" width="3.8" height="0.35" depth="1.2" color="#767b84" material="roughness: 1;"></a-box>
+      <a-box class="walkable" position="0 0.5 -7.9" width="3.1" height="0.35" depth="1.2" color="#70757e" material="roughness: 1;"></a-box>
+      <a-box class="walkable" position="0 0.8 -7.0" width="2.4" height="0.35" depth="1.2" color="#686d76" material="roughness: 1;"></a-box>
+      <a-box class="walkable" position="0 1.1 -6.1" width="1.8" height="0.35" depth="1.2" color="#626771" material="roughness: 1;"></a-box>
+
+      <a-box position="-1.65 1.3 -6" width="0.7" height="2.2" depth="0.9" color="#5f636a" material="roughness: 1;"></a-box>
+      <a-box position="1.65 1.3 -6" width="0.7" height="2.2" depth="0.9" color="#5f636a" material="roughness: 1;"></a-box>
+
+      <a-torus
+        position="0 2.25 -6"
+        radius="1.75"
+        radius-tubular="0.23"
+        color="#737982"
+        material="roughness: 1; metalness: 0.02;"
+      ></a-torus>
+
+      <a-torus
+        position="0 2.25 -6.01"
+        radius="1.28"
+        radius-tubular="0.05"
+        color="#00eaff"
+        material="emissive: #00eaff; emissiveIntensity: 1.8; roughness: 0.2;"
+      >
+        <a-animation attribute="rotation" to="0 360 0" dur="9000" repeat="indefinite" easing="linear"></a-animation>
+      </a-torus>
+
+      <a-circle
+        position="0 2.25 -6.02"
+        radius="1.16"
+        color="#9d4dff"
+        material="emissive: #9d4dff; emissiveIntensity: 1.2; opacity: 0.5; transparent: true; side: double;"
+      >
+        <a-animation attribute="material.emissiveIntensity" dir="alternate" dur="1400" from="0.7" to="1.6" repeat="indefinite"></a-animation>
+      </a-circle>
+
+      <!-- Sustituye 360_mundo1.jpg y 360_mundo2.jpg por tus equirectangulares -->
+      <a-sky
+        id="cielo360"
+        src="360_mundo1.jpg"
+        rotation="0 -90 0"
+      ></a-sky>
+    </a-scene>
+  </body>
 </html>
